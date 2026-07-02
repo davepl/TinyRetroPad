@@ -224,7 +224,6 @@ ENDIF
 ClassName   db ".",0                ; save bytes here (seems to work)
 RichDll     db "Msftedit",0         ; Rich Edit DLL (no ext saves those bytes)
 EditClass   db "RICHEDIT50W",0      ; modern Rich Edit control from WinAPI
-SaveText    db "Save",0             ; button added to system menu
 EmptyText   db 0
 
 hMain       dd 0                    ; main window handle
@@ -271,9 +270,7 @@ MStatusBar  db "&Status Bar",0
 
 MViewHelp   db "&View Help",0
 MAbout      db "&About TinyRetroPad",0
-AboutCap    db "TinyRetroPad",0
 AboutText   db "TinyRetroPad - tiny notepad-style editor",0
-SaveCap     db "TinyRetroPad",0
 SaveAskText db "Save changes?",0
 SpaceText   db " ",0
 DateBuf     db 32 dup (0)
@@ -287,8 +284,6 @@ fr          FINDREPLACEA <>        ; shared find/replace request
 hFindDlg    dd 0                   ; modeless find/replace dialog HWND
 uFindMsg    dd 0                   ; registered FINDMSGSTRING message
 
-StaticClass db "STATIC",0          ; built-in class for status bar pane
-DocName     db "TinyRetroPad",0    ; print job document name
 LnColFmt    db "  Ln %d, Col %d",0 ; status bar Ln/Col format
 StatusBuf   db 48 dup (0)          ; formatted Ln/Col text
 hStatus     dd 0                   ; status bar window handle
@@ -306,7 +301,6 @@ MDarkMode   db "Dark &Mode",0      ; View menu label
 ENDIF
 
 hInst       dd 0                   ; module handle (for dialogs)
-OpenVerb    db "open",0            ; ShellExecute verb
 HelpUrl     db "https://github.com/davepl",0
 
 ; in-memory Go To dialog template (no font block to stay compact)
@@ -625,7 +619,7 @@ MaybeSaveChanges proc NEAR
 
     AskSave:
         push    MB_YESNOCANCEL or MB_ICONQUESTION
-        push    OFFSET SaveCap
+        push    OFFSET MAbout+7
         push    OFFSET SaveAskText
         mov     eax, hMain
         push    eax
@@ -1012,7 +1006,7 @@ PrintDoc proc NEAR
     mov     ecx, SIZEOF DOCINFOA
     rep     stosb
     mov     docInf.cbSize, SIZEOF DOCINFOA
-    mov     docInf.lpszDocName, OFFSET DocName
+    mov     docInf.lpszDocName, OFFSET MAbout+7
     lea     eax, docInf
     push    eax
     push    hPrnDC
@@ -2059,7 +2053,7 @@ ENDIF
         push    FALSE
         push    hWnd
         call    [_imp__GetSystemMenu@8]
-        push    OFFSET SaveText
+        push    OFFSET MSaveMenu+1
         push    IDM_SAVE
         push    MF_STRING
         push    eax
@@ -2080,7 +2074,7 @@ ENDIF
         push    0
         push    WS_CHILD or WS_VISIBLE
         push    OFFSET StatusBuf
-        push    OFFSET StaticClass
+        push    0082h
         push    WS_EX_STATICEDGE
         call    [_imp__CreateWindowExA@48]
         mov     hStatus, eax
@@ -2542,7 +2536,7 @@ ENDIF
 
     CmdHelpAbout:
         push    MB_OK or MB_ICONINFORMATION
-        push    OFFSET AboutCap
+        push    OFFSET MAbout+7
         push    OFFSET AboutText
         push    hWnd
         call    [_imp__MessageBoxA@16]
@@ -2554,7 +2548,7 @@ ENDIF
         push    0
         push    0
         push    OFFSET HelpUrl
-        push    OFFSET OpenVerb
+        push    0
         push    0
         call    [_imp__ShellExecuteA@24]
         xor     eax, eax
