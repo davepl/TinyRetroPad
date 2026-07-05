@@ -1,0 +1,188 @@
+name: Build TinyRetroPad
+
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache MASM32
+        id: cache-masm32
+        uses: actions/cache@v6
+        with:
+          path: C:\masm32
+          key: masm32-v11r
+
+      - name: Install MASM32 SDK
+        if: steps.cache-masm32.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://www.masm32.com/download/masm32v11r.zip" -OutFile masm32v11r.zip
+          Expand-Archive -Path masm32v11r.zip -DestinationPath masm32_setup
+          7z x masm32_setup\install.exe -omasm32_stage1 -y
+          7z x masm32_stage1\.data -oC:\masm32 -y
+          if (-not (Test-Path "C:\masm32\bin\ml.exe")) {
+              throw "MASM32 installation failed - ml.exe not found"
+          }
+          Write-Host "MASM32 installed successfully"
+
+      - name: Cache Crinkler
+        id: cache-crinkler
+        uses: actions/cache@v6
+        with:
+          path: crinkler.exe
+          key: crinkler-v3.0a
+
+      - name: Download Crinkler
+        if: steps.cache-crinkler.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://github.com/runestubbe/Crinkler/releases/download/v3.0a/crinkler30a.zip" -OutFile crinkler.zip
+          Expand-Archive -Path crinkler.zip -DestinationPath crinkler_extract
+          $crinkler = Get-ChildItem -Path crinkler_extract -Recurse -Filter "crinkler.exe" | Select-Object -First 1
+          if (-not $crinkler) { throw "Crinkler not found in archive" }
+          Copy-Item $crinkler.FullName -Destination .\crinkler.exe
+
+      - name: Find Windows SDK lib path
+        id: winsdk
+        shell: pwsh
+        run: |
+          $sdkBase = "C:\Program Files (x86)\Windows Kits\10\Lib"
+          $sdkVersion = Get-ChildItem $sdkBase -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $libPath = Join-Path $sdkVersion.FullName "um\x86"
+          if (-not (Test-Path $libPath)) { throw "Windows SDK x86 lib path not found at $libPath" }
+          Write-Host "Windows SDK lib path: $libPath"
+          "SDK_LIB_PATH=$libPath" | Out-File -Append $env:GITHUB_OUTPUT
+
+      - name: Assemble
+        shell: cmd
+        run: C:\masm32\bin\ml.exe /nologo /c /coff /Cp /IC:\masm32\include trpad.asm
+
+      - name: Link with Crinkler
+        shell: cmd
+        run: |
+          crinkler.exe trpad.obj ^
+            /OUT:trpad.exe ^
+            /ENTRY:MainEntry ^
+            /SUBSYSTEM:WINDOWS ^
+            /NOINITIALIZERS ^
+            /TINYIMPORT ^
+            /ORDERTRIES:2000 ^
+            /LIBPATH:"${{ steps.winsdk.outputs.SDK_LIB_PATH }}" ^
+            kernel32.lib user32.lib shell32.lib comdlg32.lib gdi32.lib
+
+      - name: Show binary size
+        id: binsize
+        shell: pwsh
+        run: |
+          $size = (Get-Item trpad.exe).Length
+          Write-Host "trpad.exe size: $size bytes"
+          "SIZE=$size" | Out-File -Append $env:GITHUB_OUTPUT
+
+      - name: Cache pip packages
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-segno-zxing-cpp-pillow
+
+      - name: Generate QR code from binary
+        shell: pwsh
+        run: |
+          pip install segno zxing-cpp pillow
+          python -c @"
+          import segno, hashlib
+          data = open('trpad.exe', 'rb').read()
+          qr = segno.make_qr(data, mode='byte', error='L')
+          qr.save('trpad_qr.png', scale=4, border=1)
+          print(f'QR code generated, verifying roundtrip...')
+          from PIL import Image
+          import zxingcpp
+          img = Image.open('trpad_qr.png')
+          results = zxingcpp.read_barcodes(img)
+          assert len(results) == 1, f'Expected 1 barcode, got {len(results)}'
+          decoded = results[0].bytes
+          original_hash = hashlib.sha256(data).hexdigest()
+          decoded_hash = hashlib.sha256(decoded).hexdigest()
+          assert original_hash == decoded_hash, f'Hash mismatch: {original_hash} != {decoded_hash}'
+          print(f'Roundtrip verified: {len(data)} bytes, SHA256: {original_hash}')
+          "@
+
+      - name: Build summary
+        shell: pwsh
+        run: |
+          $size = "${{ steps.binsize.outputs.SIZE }}"
+          $qrSize = (Get-Item trpad_qr.png).Length
+          $bt = '``' + '`'
+          $summary = "## Build Results`n"
+          $summary += "| Artifact | Size |`n"
+          $summary += "|----------|------|`n"
+          $summary += "| trpad.exe | $size bytes |`n"
+          $summary += "| trpad_qr.png | $qrSize bytes |`n`n"
+          $summary += "### QR Code`n"
+          $summary += "The binary is small enough to fit in a QR code (max 2953 bytes for v40).`n"
+          $summary += "The QR code PNG contains the entire executable. Decode with [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp):`n`n"
+          $summary += "${bt}bash`nZXingReader -bytes trpad_qr.png > trpad.exe`n${bt}`n"
+          $summary | Out-File -Append $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: TinyRetroPad
+          path: trpad.exe
+
+      - name: Upload QR code artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: trpad_qr_png
+          path: trpad_qr.png
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: TinyRetroPad
+
+      - name: Download QR code artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: trpad_qr_png
+
+      - name: Get binary size
+        id: size
+        run: echo "SIZE=$(stat -c%s trpad.exe)" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            trpad.exe
+            trpad_qr.png
+          generate_release_notes: true
+          body: |
+            ## TinyRetroPad
+
+            **Binary size:** ${{ steps.size.outputs.SIZE }} bytes
+
+            ### QR Code
+
+            The binary is small enough to fit in a QR code! The attached `trpad_qr.png` contains the entire executable encoded as a QR code.
+
+            To decode it back to a working binary, use [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp):
+            ```bash
+            ZXingReader -bytes trpad_qr.png > trpad.exe
+            ```
