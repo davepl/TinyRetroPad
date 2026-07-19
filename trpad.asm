@@ -19,6 +19,7 @@
 ; ---------------------------------------------------------
 ;
 ; Growth History:
+; Optimized memory footprint directly after CreateWindow using SetProcessWorkingSetSize - 1024 Bytes
 ; Added FILE Menus - 1375 Bytes
 ; Added EDIT Menus - 1428 Bytes
 ; Expanded FILE Menus (Open/Save As) - 1517 Bytes
@@ -149,6 +150,9 @@ ENDIF
 
 EXTERN _imp__CreateWindowExA@48    :PTR ; create main window / EDIT control
 EXTERN _imp__GetModuleHandleA@4    :PTR ; get HINSTANCE
+; make the memory footprint extremely tiny
+EXTERN _imp__GetCurrentProcess@0         :PTR
+EXTERN _imp__SetProcessWorkingSetSize@12 :PTR
 EXTERN _imp__LoadLibraryA@4        :PTR ; load modern Rich Edit DLL
 EXTERN _imp__RegisterClassA@4      :PTR ; rgstr wndw class (was RegisterClassExA@4)
 EXTERN _imp__GetMessageA@16        :PTR ; message loop get
@@ -1855,6 +1859,28 @@ MainEntry proc NEAR
     
     mov     hMain, eax
 
+    ; -------------------------------------------------------------
+    ; CALL 1: GetCurrentProcess()
+    ; This function takes 0 arguments. We call it indirectly via its pointer.
+
+    call dword ptr [_imp__GetCurrentProcess@0]
+
+    ; The pseudo-handle for the current process is returned in EAX
+
+    ; CALL 2: SetProcessWorkingSetSize(hProcess, dwMinSize, dwMaxSize)
+    ; -------------------------------------------------------------
+    ; Arguments are pushed onto the stack from right to left (stdcall):
+    
+    push -1                 ; Argument 3: dwMaximumWorkingSetSize (-1 trims memory)
+    push -1                 ; Argument 2: dwMinimumWorkingSetSize (-1 trims memory)
+    push eax                ; Argument 1: hProcess (The handle returned from Call 1)
+    
+    ; Call the function indirectly via its pointer
+
+    call dword ptr [_imp__SetProcessWorkingSetSize@12]
+
+    ; EAX now contains 1 if successful, or 0 if it failed. Continue even if it failed
+    
     ; load file and set title
     call    LoadStartupFile
     xor     eax, eax
