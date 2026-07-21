@@ -1923,10 +1923,10 @@ MainEntry proc NEAR
         mov     ecx, IDM_FILE_OPEN
         jmp     SendAppAccel
       AccelSave:
-        mov     ecx, IDM_SAVE
         push    VK_SHIFT
         call    [_imp__GetKeyState@4]
         test    ah, 80h
+        mov     ecx, IDM_SAVE
         je      SendAppAccel
         mov     ecx, IDM_FILE_SAVEAS
         jmp     SendAppAccel
