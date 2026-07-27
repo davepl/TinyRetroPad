@@ -33,6 +33,7 @@
 ; Added VIEW Status Bar (Ln/Col) - 2476 Bytes
 ; Added DIALOG based Feature - 2686 Bytes
 ; Added KEYBOARD accelerators - 2794 Bytes
+; Fixed CLOSE box save prompt - 2799 Bytes
 ; Compiler directives and includes:
  
 .386                       ; Full 80386 instruction set and mode
@@ -43,7 +44,7 @@ option casemap:none        ; Preserve the case of system identifiers but not our
 ; Optional features are gated behind assembly-time switches.
 ; Set a switch to 1 to compile the feature in, or 0 to leave
 ; it out entirely.  With every switch 0 the output is byte-
-; for-byte the original baseline build (2686 bytes); a feature
+; for-byte the baseline build (2799 bytes); a feature
 ; only costs space when it is switched on.
 FEAT_LINENUMBERS = 0       ; View > Line Numbers gutter (default OFF)
 FEAT_DARKMODE    = 0       ; View > Dark Mode (default OFF)
@@ -2663,6 +2664,13 @@ ENDIF
 
     ; check for WM_DESTROY
     NotWMSize:
+
+        ; close box / Alt+F4 / system Close: same prompt as File > Exit
+        ; CmdFileExit returns 0 either way, which for WM_CLOSE means
+        ; "handled" -- so a cancelled save prompt simply leaves us open
+        cmp     uMsg, WM_CLOSE
+        je      CmdFileExit
+
         cmp     uMsg, WM_DESTROY
         jne     NotWMDestroy
 
